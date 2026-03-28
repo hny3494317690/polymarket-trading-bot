@@ -41,10 +41,11 @@ class StrategyConfig:
     coin: str = "ETH"
     size: float = 5.0  # USDC size per trade
     max_positions: int = 1
-    take_profit: float = 0.10
-    stop_loss: float = 0.05
+    take_profit: Optional[float] = 0.10
+    stop_loss: Optional[float] = 0.05
 
     # Market settings
+    market_window_minutes: int = 15
     market_check_interval: float = 30.0
     auto_switch_market: bool = True
 
@@ -82,6 +83,7 @@ class BaseStrategy(ABC):
         # Core components
         self.market = MarketManager(
             coin=config.coin,
+            market_window_minutes=config.market_window_minutes,
             market_check_interval=config.market_check_interval,
             auto_switch_market=config.auto_switch_market,
         )

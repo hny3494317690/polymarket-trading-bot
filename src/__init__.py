@@ -36,6 +36,7 @@ from .client import ApiClient, ClobClient, RelayerClient
 from .crypto import KeyManager
 from .config import Config, BuilderConfig
 from .gamma_client import GammaClient
+from .rtds_client import CryptoPriceWebSocket, CryptoPriceUpdate
 from .websocket_client import MarketWebSocket, OrderbookManager, OrderbookSnapshot
 
 # Utility functions
@@ -64,6 +65,8 @@ __all__ = [
     "Config",
     "BuilderConfig",
     "GammaClient",
+    "CryptoPriceWebSocket",
+    "CryptoPriceUpdate",
     "MarketWebSocket",
     "OrderbookManager",
     "OrderbookSnapshot",

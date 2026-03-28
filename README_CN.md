@@ -47,6 +47,17 @@ python strategies/flash_crash_strategy.py --coin BTC
 
 就这么简单！你已经准备好开始交易了。
 
+### 可选：Web UI（无需手写 `.env`）
+
+使用内置本地 Web 界面，在浏览器里填写凭证和策略参数。
+
+```bash
+python apps/webui.py
+```
+
+然后打开 [http://127.0.0.1:8765](http://127.0.0.1:8765)。  
+你可以直接在页面里保存配置并启动/停止策略。
+
 ## 交易策略
 
 ### 闪崩策略 (Flash Crash Strategy)

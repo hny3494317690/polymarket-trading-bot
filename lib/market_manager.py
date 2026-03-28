@@ -2,7 +2,7 @@
 Market Manager - Market Discovery and WebSocket Management
 
 Provides unified interface for:
-- 15-minute market discovery via GammaClient
+- short-duration market discovery via GammaClient
 - WebSocket connection and subscription management
 - Automatic market switching when markets expire
 - Real-time orderbook caching
@@ -140,7 +140,7 @@ class MarketManager:
     Manages market discovery and WebSocket connections.
 
     Provides:
-    - Automatic 15-minute market discovery
+    - Automatic market discovery for configurable time windows
     - WebSocket connection with auto-reconnect
     - Market change detection and notification
     - Orderbook caching
@@ -149,6 +149,7 @@ class MarketManager:
     def __init__(
         self,
         coin: str = "BTC",
+        market_window_minutes: int = 15,
         market_check_interval: float = 30.0,
         auto_switch_market: bool = True,
     ):
@@ -157,10 +158,12 @@ class MarketManager:
 
         Args:
             coin: Coin symbol (BTC, ETH, SOL, XRP)
+            market_window_minutes: Market window size in minutes (e.g. 5 or 15)
             market_check_interval: Seconds between market checks
             auto_switch_market: Auto switch when market changes
         """
         self.coin = coin.upper()
+        self.market_window_minutes = market_window_minutes
         self.market_check_interval = market_check_interval
         self.auto_switch_market = auto_switch_market
 
@@ -291,12 +294,15 @@ class MarketManager:
 
     def discover_market(self, update_state: bool = True) -> Optional[MarketInfo]:
         """
-        Discover current 15-minute market.
+        Discover the current market for the configured window.
 
         Returns:
             MarketInfo if found, None otherwise
         """
-        market_data = self.gamma.get_market_info(self.coin)
+        market_data = self.gamma.get_market_info(
+            self.coin,
+            interval_minutes=self.market_window_minutes,
+        )
 
         if not market_data:
             return None

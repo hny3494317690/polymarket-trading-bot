@@ -3,7 +3,7 @@
 Orderbook TUI - Real-time Orderbook Viewer
 
 A terminal-based UI for viewing real-time orderbook data
-for Polymarket 15-minute markets.
+for Polymarket short-duration markets.
 
 Features:
 - Real-time WebSocket orderbook updates
@@ -13,7 +13,7 @@ Features:
 
 Usage:
     python apps/orderbook_tui.py --coin ETH
-    python apps/orderbook_tui.py --coin BTC
+    python apps/orderbook_tui.py --coin BTC --market-window 5
 """
 
 import os
@@ -40,10 +40,14 @@ from lib.console import format_countdown
 class OrderbookTUI:
     """Real-time orderbook viewer."""
 
-    def __init__(self, coin: str = "ETH"):
+    def __init__(self, coin: str = "ETH", market_window_minutes: int = 15):
         """Initialize TUI."""
         self.coin = coin.upper()
-        self.market = MarketManager(coin=self.coin)
+        self.market_window_minutes = market_window_minutes
+        self.market = MarketManager(
+            coin=self.coin,
+            market_window_minutes=market_window_minutes,
+        )
         self.prices = PriceTracker()
         self.running = False
 
@@ -96,7 +100,10 @@ class OrderbookTUI:
             countdown = format_countdown(mins, secs)
 
         lines.append(f"{Colors.BOLD}{'='*80}{Colors.RESET}")
-        lines.append(f"{Colors.CYAN}Orderbook TUI{Colors.RESET} | {self.coin} | {ws_status} | Ends: {countdown}")
+        lines.append(
+            f"{Colors.CYAN}Orderbook TUI{Colors.RESET} | {self.coin} {self.market_window_minutes}m | "
+            f"{ws_status} | Ends: {countdown}"
+        )
         lines.append(f"{Colors.BOLD}{'='*80}{Colors.RESET}")
 
         # Market info
@@ -160,7 +167,7 @@ class OrderbookTUI:
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Orderbook TUI for Polymarket 15-minute markets"
+        description="Orderbook TUI for Polymarket short-duration markets"
     )
     parser.add_argument(
         "--coin",
@@ -169,10 +176,19 @@ def main():
         choices=["BTC", "ETH", "SOL", "XRP"],
         help="Coin to monitor (default: ETH)"
     )
+    parser.add_argument(
+        "--market-window",
+        type=int,
+        default=15,
+        help="Market window size in minutes (default: 15)"
+    )
 
     args = parser.parse_args()
 
-    tui = OrderbookTUI(coin=args.coin)
+    if args.market_window <= 0:
+        parser.error("--market-window must be greater than 0")
+
+    tui = OrderbookTUI(coin=args.coin, market_window_minutes=args.market_window)
 
     try:
         asyncio.run(tui.run())

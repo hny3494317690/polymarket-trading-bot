@@ -48,17 +48,21 @@ class Position:
     order_id: Optional[str] = None
 
     # TP/SL config (set by PositionManager)
-    take_profit_delta: float = 0.10
-    stop_loss_delta: float = 0.05
+    take_profit_delta: Optional[float] = 0.10
+    stop_loss_delta: Optional[float] = 0.05
 
     @property
-    def take_profit_price(self) -> float:
+    def take_profit_price(self) -> Optional[float]:
         """Target price for take profit."""
+        if self.take_profit_delta is None or self.take_profit_delta <= 0:
+            return None
         return self.entry_price + self.take_profit_delta
 
     @property
-    def stop_loss_price(self) -> float:
+    def stop_loss_price(self) -> Optional[float]:
         """Target price for stop loss."""
+        if self.stop_loss_delta is None or self.stop_loss_delta <= 0:
+            return None
         return self.entry_price - self.stop_loss_delta
 
     def get_pnl(self, current_price: float) -> float:
@@ -77,11 +81,17 @@ class Position:
 
     def check_take_profit(self, current_price: float) -> bool:
         """Check if take profit is triggered."""
-        return current_price >= self.take_profit_price
+        target = self.take_profit_price
+        if target is None:
+            return False
+        return current_price >= target
 
     def check_stop_loss(self, current_price: float) -> bool:
         """Check if stop loss is triggered."""
-        return current_price <= self.stop_loss_price
+        target = self.stop_loss_price
+        if target is None:
+            return False
+        return current_price <= target
 
 
 @dataclass
@@ -95,8 +105,8 @@ class PositionManager:
     - Trade statistics
     """
 
-    take_profit: float = 0.10  # +10 cents
-    stop_loss: float = 0.05  # -5 cents
+    take_profit: Optional[float] = 0.10  # +10 cents, None disables TP
+    stop_loss: Optional[float] = 0.05  # -5 cents, None disables SL
     max_positions: int = 1  # Max concurrent positions
 
     # State

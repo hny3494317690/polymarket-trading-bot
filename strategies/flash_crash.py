@@ -1,11 +1,11 @@
 """
-Flash Crash Strategy - Volatility Trading for 15-Minute Markets
+Flash Crash Strategy - Volatility Trading for Short-Duration Markets
 
-This strategy monitors 15-minute Up/Down markets for sudden probability drops
+This strategy monitors short-duration Up/Down markets for sudden probability drops
 and executes trades when probability crashes by a threshold within a lookback window.
 
 Strategy Logic:
-1. Auto-discover current 15-minute market for selected coin
+1. Auto-discover current market window for selected coin
 2. Monitor orderbook prices in real-time via WebSocket
 3. When either "Up" or "Down" probability drops by threshold:
    - Market buy the crashed side
@@ -21,7 +21,8 @@ Usage:
 """
 
 from dataclasses import dataclass
-from typing import Dict
+import re
+from typing import Dict, List, Optional, Tuple
 
 from lib.console import Colors, format_countdown
 from strategies.base import BaseStrategy, StrategyConfig
@@ -34,13 +35,18 @@ class FlashCrashConfig(StrategyConfig):
     """Flash crash strategy configuration."""
 
     drop_threshold: float = 0.30  # Absolute probability drop
+    open_change_ranges_bps: str = ""  # e.g. "40-999 -999--40"
+    yes_price_min: Optional[float] = None
+    yes_price_max: Optional[float] = None
+    no_price_min: Optional[float] = None
+    no_price_max: Optional[float] = None
 
 
 class FlashCrashStrategy(BaseStrategy):
     """
     Flash Crash Trading Strategy.
 
-    Monitors 15-minute markets for sudden price drops and trades
+    Monitors short-duration markets for sudden price drops and trades
     the volatility with defined take-profit and stop-loss levels.
     """
 
@@ -52,25 +58,114 @@ class FlashCrashStrategy(BaseStrategy):
         # Update price tracker with our threshold
         self.prices.drop_threshold = config.drop_threshold
 
+        self._opening_prices: Dict[str, float] = {}
+        self._open_change_ranges = self.parse_change_ranges_bps(config.open_change_ranges_bps)
+
+    @staticmethod
+    def parse_change_ranges_bps(expr: str) -> List[Tuple[int, int]]:
+        """
+        Parse bps ranges from text.
+
+        Supports formats like:
+        - "40-999"
+        - "-999--40"
+        - "40-999, -999--40"
+        """
+        text = (expr or "").strip()
+        if not text:
+            return []
+
+        ranges: List[Tuple[int, int]] = []
+        tokens = [t.strip() for t in re.split(r"[,\s]+", text) if t.strip()]
+        for token in tokens:
+            match = re.fullmatch(r"([+-]?\d+)\s*-\s*([+-]?\d+)", token)
+            if not match:
+                raise ValueError(
+                    f"Invalid open change range '{token}'. Use formats like 40-999 or -999--40."
+                )
+            start = int(match.group(1))
+            end = int(match.group(2))
+            low, high = (start, end) if start <= end else (end, start)
+            ranges.append((low, high))
+        return ranges
+
+    def _ensure_opening_prices(self, prices: Dict[str, float]) -> None:
+        """Capture first observed prices after market starts/switches as opening prices."""
+        for side in ("up", "down"):
+            if side not in self._opening_prices:
+                price = prices.get(side, 0.0)
+                if price > 0:
+                    self._opening_prices[side] = price
+                    self.log(f"Captured opening price: {side.upper()}={price:.4f}", "debug")
+
+    def _open_change_bps(self, side: str, current_price: float) -> Optional[int]:
+        """Get change vs opening price in bps (1 bps = 0.01%)."""
+        opening = self._opening_prices.get(side)
+        if opening is None or opening <= 0:
+            return None
+        return int(round((current_price - opening) / opening * 10000))
+
+    def _in_open_change_ranges(self, side: str, current_price: float) -> bool:
+        """Check if opening-price change is inside configured ranges."""
+        if not self._open_change_ranges:
+            return True
+        change_bps = self._open_change_bps(side, current_price)
+        if change_bps is None:
+            return False
+        return any(low <= change_bps <= high for low, high in self._open_change_ranges)
+
+    def _in_side_price_range(self, side: str, price: float) -> bool:
+        """Check if side price is within configured YES/NO range."""
+        if side == "up":
+            low = self.flash_config.yes_price_min
+            high = self.flash_config.yes_price_max
+        else:
+            low = self.flash_config.no_price_min
+            high = self.flash_config.no_price_max
+
+        if low is not None and price < low:
+            return False
+        if high is not None and price > high:
+            return False
+        return True
+
     async def on_book_update(self, snapshot: OrderbookSnapshot) -> None:
         """Handle orderbook update - check for flash crashes."""
         pass  # Price recording is done in base class
 
     async def on_tick(self, prices: Dict[str, float]) -> None:
         """Check for flash crash on each tick."""
+        self._ensure_opening_prices(prices)
+
         if not self.positions.can_open_position:
             return
 
         # Detect flash crash
         event = self.prices.detect_flash_crash()
         if event:
-            self.log(
-                f"FLASH CRASH: {event.side.upper()} "
-                f"drop {event.drop:.2f} ({event.old_price:.2f} -> {event.new_price:.2f})",
-                "trade"
-            )
             current_price = prices.get(event.side, 0)
             if current_price > 0:
+                if not self._in_open_change_ranges(event.side, current_price):
+                    change_bps = self._open_change_bps(event.side, current_price)
+                    self.log(
+                        f"Skip {event.side.upper()}: open-change filter not matched "
+                        f"(change={change_bps} bps)",
+                        "debug",
+                    )
+                    return
+                if not self._in_side_price_range(event.side, current_price):
+                    self.log(
+                        f"Skip {event.side.upper()}: side price filter not matched "
+                        f"(price={current_price:.4f})",
+                        "debug",
+                    )
+                    return
+
+                self.log(
+                    f"FLASH CRASH: {event.side.upper()} "
+                    f"drop {event.drop:.2f} ({event.old_price:.2f} -> {event.new_price:.2f})",
+                    "trade"
+                )
                 await self.execute_buy(event.side, current_price)
 
     def render_status(self, prices: Dict[str, float]) -> None:
@@ -130,6 +225,13 @@ class FlashCrashStrategy(BaseStrategy):
             f"History: UP={up_history}/100 DOWN={down_history}/100 | "
             f"Drop threshold: {self.flash_config.drop_threshold:.2f} in {self.config.price_lookback_seconds}s"
         )
+        lines.append(
+            f"Filters: Open-change(bps)={self.flash_config.open_change_ranges_bps or 'any'} | "
+            f"YES={self.flash_config.yes_price_min if self.flash_config.yes_price_min is not None else '-'}"
+            f"~{self.flash_config.yes_price_max if self.flash_config.yes_price_max is not None else '-'} | "
+            f"NO={self.flash_config.no_price_min if self.flash_config.no_price_min is not None else '-'}"
+            f"~{self.flash_config.no_price_max if self.flash_config.no_price_max is not None else '-'}"
+        )
 
         lines.append(f"{Colors.BOLD}{'='*80}{Colors.RESET}")
 
@@ -167,9 +269,17 @@ class FlashCrashStrategy(BaseStrategy):
                     f"Size: ${pos.size:.2f} | PnL: {color}${pnl:+.2f} ({pnl_pct:+.1f}%){Colors.RESET} | "
                     f"Hold: {hold_time:.0f}s"
                 )
+                tp_text = "off"
+                if pos.take_profit_price is not None and self.config.take_profit is not None:
+                    tp_text = f"{pos.take_profit_price:.4f} (+${self.config.take_profit:.2f})"
+
+                sl_text = "off"
+                if pos.stop_loss_price is not None and self.config.stop_loss is not None:
+                    sl_text = f"{pos.stop_loss_price:.4f} (-${self.config.stop_loss:.2f})"
+
                 lines.append(
-                    f"       TP: {pos.take_profit_price:.4f} (+${self.config.take_profit:.2f}) | "
-                    f"SL: {pos.stop_loss_price:.4f} (-${self.config.stop_loss:.2f})"
+                    f"       TP: {tp_text} | "
+                    f"SL: {sl_text}"
                 )
         else:
             lines.append(f"  {Colors.CYAN}(no open positions){Colors.RESET}")
@@ -197,3 +307,4 @@ class FlashCrashStrategy(BaseStrategy):
     def on_market_change(self, old_slug: str, new_slug: str) -> None:
         """Handle market change - clear price history."""
         self.prices.clear()
+        self._opening_prices.clear()

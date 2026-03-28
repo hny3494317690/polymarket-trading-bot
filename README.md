@@ -47,6 +47,17 @@ python strategies/flash_crash_strategy.py --coin BTC
 
 That's it! You're ready to trade.
 
+### Optional: Web UI (No Manual `.env` Editing)
+
+Use the built-in local Web UI to fill credentials and strategy params in a browser.
+
+```bash
+python apps/webui.py
+```
+
+Then open [http://127.0.0.1:8765](http://127.0.0.1:8765).  
+You can save config and start/stop the strategy directly from the page.
+
 ## Trading Strategies
 
 ### Flash Crash Strategy
